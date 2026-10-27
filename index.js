@@ -384,6 +384,47 @@ function fixed(value, digits = 2) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
 }
 
+/** A distribution at least this flat is not a usable answer; report it as uncertain instead. */
+const LOW_TOP_PROBABILITY = 0.6
+const LOW_CONFIDENCE = 0.5
+
+/**
+ * Flag every answer whose distribution is too flat to present as settled, and say
+ * whether any question is in that state. Consumers (the model and the card) then
+ * share one definition of "low confidence" instead of each re-deriving thresholds.
+ */
+function annotateConfidence(answers) {
+  if (!isPlainObject(answers)) return { answers: {}, lowConfidence: false }
+  let lowConfidence = false
+  const annotated = {}
+  for (const [id, answer] of Object.entries(answers)) {
+    if (!isPlainObject(answer) || answer.error) {
+      annotated[id] = answer
+      continue
+    }
+    let low = false
+    if (answer.type === 'choice') {
+      const probabilities = isPlainObject(answer.probabilities) ? answer.probabilities : {}
+      const values = Object.values(probabilities).filter((value) => typeof value === 'number')
+      const top = values.length > 0 ? Math.max(...values) : 0
+      low = top < LOW_TOP_PROBABILITY || (typeof answer.confidence === 'number' && answer.confidence < LOW_CONFIDENCE)
+    } else if (answer.type === 'score') {
+      low = typeof answer.confidence === 'number' && answer.confidence < LOW_CONFIDENCE
+    } else if (answer.type === 'noul') {
+      low = typeof answer.noul === 'number' && Math.abs(answer.noul - 0.5) < 0.1
+    } else if (answer.type === 'box') {
+      low = typeof answer.confidence === 'number' && answer.confidence < LOW_CONFIDENCE
+    }
+    if (low) {
+      lowConfidence = true
+      annotated[id] = { ...answer, lowConfidence: true }
+    } else {
+      annotated[id] = answer
+    }
+  }
+  return { answers: annotated, lowConfidence }
+}
+
 function formatAnswers(value) {
   const lines = [`Decision 3.0 · ${value.model || DEFAULT_MODEL}`]
   if (value.usage && typeof value.usage.input_tokens === 'number') {
@@ -400,6 +441,9 @@ function formatAnswers(value) {
     if (answer.error) {
       lines.push(`error: ${answer.error}${answer.reason ? ` (${answer.reason})` : ''} — ${answer.message || ''}`)
       continue
+    }
+    if (answer.lowConfidence) {
+      lines.push('⚠ low confidence: the distribution is not concentrated; do not report the top answer as settled.')
     }
     switch (answer.type) {
       case 'choice': {
@@ -435,6 +479,12 @@ function formatAnswers(value) {
   }
   if (Array.isArray(value.warnings) && value.warnings.length > 0) {
     lines.push('', `notes: ${value.warnings.join('; ')}`)
+  }
+  if (value.hint === 'low-confidence') {
+    lines.push(
+      '',
+      'hint: low-confidence — state the uncertainty, or retry with sharper instructions/options or a stronger model.',
+    )
   }
   return lines.join('\n')
 }
@@ -642,6 +692,7 @@ const ASK_OUTPUT_SCHEMA = {
     usage: { type: 'object', additionalProperties: true },
     requestId: { type: 'string' },
     warnings: { type: 'array', items: { type: 'string' } },
+    hint: { type: 'string', description: 'low-confidence when at least one answer is too flat to report as settled.' },
   },
 }
 
@@ -675,7 +726,10 @@ function registerTools(ctx) {
     description:
       'Ask the Decision 3.0 multimodal decision models for calibrated probabilities: choice, yes/no (noul), ' +
       'ordered score and image box questions in one call. Returns per-question probabilities and confidence; ' +
-      'the models generate no text, so treat the numbers as the answer.',
+      'the models generate no text, so treat the numbers as the answer. If the top probability is below 0.6, a ' +
+      'question is flagged lowConfidence, or the result carries hint "low-confidence", do not present the top ' +
+      'answer as settled: tell the user the evidence is inconclusive, or retry with sharper instructions, more ' +
+      'options, or a stronger model (d3-turbo / d3-ultra).',
     parameters: ASK_PARAMETERS,
     output: {
       schema: ASK_OUTPUT_SCHEMA,
@@ -721,9 +775,11 @@ function registerTools(ctx) {
         signal: exec.signal,
       })
       const json = isPlainObject(result.json) ? result.json : {}
+      const annotated = annotateConfidence(json.answers)
       const value = {
         model: typeof json.model === 'string' ? json.model : model,
-        answers: isPlainObject(json.answers) ? json.answers : {},
+        answers: annotated.answers,
+        ...(annotated.lowConfidence ? { hint: 'low-confidence' } : {}),
         ...(isPlainObject(json.usage) ? { usage: json.usage } : {}),
         ...(result.requestId ? { requestId: result.requestId } : {}),
       }

@@ -757,7 +757,9 @@ window.__ModuleLoader__.load({
           )
         } else if (answer.type === 'box') {
           const box = answer.box && typeof answer.box === 'object' ? answer.box : {}
-          const low = typeof answer.confidence === 'number' && answer.confidence < 0.5
+          const low =
+            answer.lowConfidence === true ||
+            (typeof answer.confidence === 'number' && answer.confidence < 0.5)
           blocks.push(
             h(
               'div',
@@ -771,6 +773,10 @@ window.__ModuleLoader__.load({
           )
         } else {
           blocks.push(h('div', { className: 'dsd-hint', key: 'raw' }, JSON.stringify(answer)))
+        }
+        // Host flags a flat distribution; surface it for every question type, not just box.
+        if (answer.lowConfidence === true && answer.type !== 'box') {
+          blocks.push(h('div', { className: 'dsd-error', key: 'low' }, `⚠ ${t('card.lowConfidence')}`))
         }
         return h('div', { className: 'dsd-q', key: id }, blocks)
       })

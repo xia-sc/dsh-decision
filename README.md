@@ -269,6 +269,7 @@ DECISION_API_KEY 环境变量
 | `apply(ctx)` | 注册工具；`ctx.inject(['webServer'])` **等服务就绪**后注册路由（冷启动竞态修复点） |
 | `registerTools(ctx)` | `ctx.tools.register` 两个 ToolDefinition（`parameters` / `output.schema` / `execute` / `render`） |
 | `buildQuestions(raw)` | 按题型校验 `criteria`，统计 box 题数量 |
+| `annotateConfidence(answers)` | 按阈值给每题标 `lowConfidence`，并决定整次结果是否带 `hint: "low-confidence"`（模型与卡片共用） |
 | `buildMedia(list, kind)` | 本地文件 → `data:` URL，按扩展名定 MIME、按大小上限拒绝 |
 | `apiRequest(ctx, opts)` | 统一 fetch：超时 35s、`X-API-Key`、错误归一化（`code`/`status`/`retryAfter`） |
 | `resolveApiKey` / `saveApiKey` | 三级解析与写入（见 3.5） |
@@ -354,6 +355,23 @@ ctx.tools.register({
 | `box` | 无（靠 `instructions` 描述目标） | `box{top,left,bottom,right}` + `confidence` |
 
 返回给模型的结构化结果：`{ model, answers, usage, requestId }`；同时渲染成分题 markdown 文本（概率降序、`confidence`、`legend`、错误题原样展示）。
+
+**低置信标注**（阈值由 Host 统一计算，模型与卡片共用同一套判断）：
+
+| 题型 | 判定为低置信 |
+|---|---|
+| `choice` | 最高概率 < 0.6，或 `confidence` < 0.5 |
+| `score` | `confidence` < 0.5 |
+| `noul` | `noul` 落在 0.4–0.6 之间 |
+| `box` | `confidence` < 0.5 |
+
+命中时：
+
+- 该题返回 `lowConfidence: true`（照常带 `probabilities` / `confidence`）；
+- 整次结果额外带 `hint: "low-confidence"`；
+- 文本渲染在该题标题后加一行 `⚠ low confidence`，并在末尾加 `hint: low-confidence — …`；
+- 对话卡片给对应题标「低置信」；
+- `decision_ask` 的工具描述要求模型此时**不要把 argmax 当作结论**：说明证据不足，或用更清晰的措辞 / 更多选项 / 更强模型（`d3-turbo`、`d3-ultra`）重试。
 
 `decision_info` 的 `action`：`models`（模型与 limits）、`usage`（今日配额与 p50/p90 延迟）、`status`（模型实时状态）。
 
