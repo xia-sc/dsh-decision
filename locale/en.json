@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "title": "Decision 3.0",
+    "description": "Ask multimodal decision models for calibrated probabilities, image boxes and quota status."
+  },
+  "settings": {
+    "title": "Decision",
+    "subtitle": "Decision 3.0 · multimodal decision models",
+    "apiKey": "API key",
+    "apiKeyPlaceholder": "sk-vsr-...",
+    "apiKeyConfigured": "Configured",
+    "apiKeyMissing": "Not configured",
+    "save": "Save and verify",
+    "saving": "Verifying...",
+    "saved": "Saved",
+    "model": "Default model",
+    "usage": "Today",
+    "usageRequests": "requests",
+    "usageTokens": "tokens",
+    "usageNone": "No key configured, so usage is unavailable.",
+    "models": "Models",
+    "modelName": "Model",
+    "modelSize": "Size",
+    "modelBox": "Box",
+    "modelReady": "Ready",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "errorPrefix": "Request failed: ",
+    "cardRunning": "Asking decision model...",
+    "cardSummary": "Decision",
+    "cardNoData": "Detailed result is unavailable; see the tool output above.",
+    "cardLowConfidence": "low confidence",
+    "noulYes": "yes",
+    "noulNo": "no"
+  }
+}

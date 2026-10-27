@@ -1,0 +1,10 @@
+# 本机/运行时产物，不应进入仓库
+node_modules/
+.acl-recovery/
+.playwright-mcp/
+.plugin-manager/
+*.tmp
+*.log
+
+# 本地测试图片（probe2.mjs 需要时用 Pillow 生成，见 README 7.1）
+.bench/test.png
