@@ -1,4 +1,4 @@
-# @local/dsh-decision
+# @xia-sc/dsh-decision
 
 把 [Decision 3.0](https://decision.vllm-sr.ai/)（vLLM Semantic Router 的 System One 决策 API）接进 DeepSeek Harness：
 让 Agent 能对一段文本 / 图片 / 视频**问带选项的问题**，拿回的是**校准概率**而不是生成文本；同时在 Web UI 里给出可视化的概率条和设置页。
@@ -18,6 +18,13 @@
   - [7.1 性能实测](#7-1-性能实测)
 - [8. 排查](#8-排查)
 - [9. 已知边界](#9-已知边界)
+- [10. 兼容性](#10-兼容性)
+  - [10.1 运行环境](#10-1-运行环境)
+  - [10.2 依赖的 Harness 扩展点](#10-2-Harness-扩展点)
+  - [10.3 Decision API 依赖](#10-3-Decision-API)
+  - [10.4 版本矩阵](#10-4-版本矩阵)
+  - [10.5 发布与安装形态](#10-5-发布与安装形态)
+  - [10.6 已知不兼容 / 限制](#10-6-已知不兼容)
 
 -----
 
@@ -37,6 +44,10 @@
 ## 2. 安装与配置
 
 ```text
+# 从 npm 安装（发布后可用）
+plugin_manager action=install_bundle target=@xia-sc/dsh-decision
+
+# 或者从本地目录安装（开发：link 到本目录，改代码即时生效）
 plugin_manager action=install_bundle target=<本目录绝对路径>
 ```
 
@@ -57,7 +68,7 @@ Host 端零 npm 依赖、无需构建；安装后整页刷新（`Ctrl+R`）即�
 **第 0 步 — 前置检查**
 
 - 确认插件目录是本包根（同时存在 `package.json`、`cordis.patch.yml`、`index.js`、`client.js`），记下它的**绝对路径** `<PLUGIN_DIR>`。
-- 确认 `package.json` 的 `name` 是 `@local/dsh-decision`，`dsh.bundle.patch` 指向 `./cordis.patch.yml`。
+- 确认 `package.json` 的 `name` 是 `@xia-sc/dsh-decision`，`dsh.bundle.patch` 指向 `./cordis.patch.yml`。
 - 不需要 `npm install`、不需要构建（Host 零依赖，Client 只 `require('react')`）。
 
 **第 1 步 — 安装 bundle**
@@ -305,7 +316,7 @@ ctx.tools.register({
 <a id="5-3-Client-关键结构"></a>
 ### 5.3 Client 端关键结构（`client.js`）
 
-- 以 `window.__ModuleLoader__.load({ id: '@local/dsh-decision', factory(require) })` 注册；`inject: ['slots', 'locale']`。
+- 以 `window.__ModuleLoader__.load({ id: '@xia-sc/dsh-decision', factory(require) })` 注册；`inject: ['slots', 'locale']`。
 - **设置页**：`ctx.slots.inject('settings.section', () => ctx.slots.register({ name, id: 'dsh-decision', order: 60, label }, Component))`。
 - **卡片**：`ctx.slots.register({ name: 'tool.call.toolview', key: 'decision_ask' }, Wrapper)`，`Wrapper` 用 `CardBoundary`（错误边界）包住卡片，渲染失败时显示原因并上报，而不是整行空白。
 - **卡片组件**：`callId` → `/result` → 按 `answer.type` 渲染：
@@ -429,3 +440,93 @@ node .bench/probe2.mjs
 - 视频只作为普通题的输入（`noul` / `choice` / `score`），不产生轨迹（`track`）；`box` 只有 `d3-turbo` / `d3-ultra` / `d3-flash` 支持。
 - 插件不导出 `Config`：参数在设置页与 `$DSH_HOME/.dsh-decision.json` 管理，不引入 `schemastery` 依赖。
 - 卡片渲染在工具调用行内（不在助手正文里），历史会话需要滚到对应调用处。
+
+<a id="10-兼容性"></a>
+## 10. 兼容性
+
+<a id="10-1-运行环境"></a>
+### 10.1 运行环境
+
+| 项 | 支持范围 | 说明 |
+|---|---|---|
+| DeepSeek Harness | 0.2.x（实测 `0.2.1-rc.3`） | 依赖的扩展点见 10.2；更早版本未验证 |
+| Harness 形态 | **Web GUI**（`dsh web` 或桌面应用的渲染进程） | Host 工具与 `/dsh-decision/*` 路由在 Host 进程；设置页与卡片需要 Client slots |
+| TUI / headless / ACP | **部分支持** | 工具、路由、密钥/模型存储可用；设置页与卡片不渲染（没有 slots），Key 用环境变量或 `$DSH_HOME` 文件配置 |
+| Node.js | ≥ 18（宿主运行时，实测 Node 26） | 用全局 `fetch`、`AbortController`、`performance.now`，无原生依赖 |
+| 操作系统 | Windows（实测）/ macOS / Linux | 无平台特定代码；路径走 `node:path`，媒体按扩展名转 `data:` URL |
+| 浏览器 | Chromium / Firefox 现代版 | 只用 `fetch`、CSS 变量（`--dsw-alias-*`）、`localStorage` |
+| npm（发布） | ≥ 9 | 发布走 `.github/workflows/publish.yml`，见 10.5 |
+
+<a id="10-2-Harness-扩展点"></a>
+### 10.2 依赖的 Harness 扩展点
+
+| 扩展点 | 用途 | 缺失时的行为 |
+|---|---|---|
+| `ctx.tools.register` | 注册 `decision_ask` / `decision_info` | 插件不激活（`inject: ['tools']`） |
+| `ctx.inject(['webServer'])` + `webServer.register` | 五条同源路由 | 工具可用，设置页/卡片报 404 |
+| `ctx.credentials` | Key 存 `DECISION_API_KEY` | 回退到环境变量或 `$DSH_HOME/.dsh-decision.json` |
+| `ctx.slots`（`settings.section`、`tool.call.toolview`） | 设置页与卡片 | 只影响 UI，不影响工具 |
+| `window.__ModuleLoader__` | Client bundle 注册 | 同上 |
+| `--dsw-alias-*` 主题 token | 样式跟随主题 | 回退为基础样式，不崩 |
+
+<a id="10-3-Decision-API"></a>
+### 10.3 Decision API 依赖
+
+| 能力 | 端点 / 字段 | 必需 |
+|---|---|---|
+| 决策请求 | `POST /v1/systemone`（`/v1/decisions` 同义） | 是 |
+| 模型表与上限 | `GET /api/info` | 是（模型下拉、limits） |
+| 配额与用量 | `GET /api/keys/self`、`/api/keys/self/usage` | 否（失败只影响用量区） |
+| 服务状态 | `GET /api/status` | 否（`decision_info action=status`） |
+| 鉴权 | `X-API-Key` 或 `Authorization: Bearer` | 是 |
+| 题型 | `choice` / `noul` / `score` | 全部模型 |
+| 题型 | `box` | 仅 `d3-turbo` / `d3-ultra` / `d3-flash`（其余返回 `box_unsupported`） |
+| 媒体 | 图片（PNG/JPEG/WebP）、视频（MP4/WebM/MOV/MKV） | 可选 |
+
+<a id="10-4-版本矩阵"></a>
+### 10.4 版本矩阵
+
+| 插件版本 | Harness 版本 | npm | 说明 |
+|---|---|---|---|
+| `0.1.x` | `0.2.x`（rc 系列） | `@xia-sc/dsh-decision` | 当前版本：五条路由、双层缓存、卡片错误边界 |
+| `< 0.1.0` | — | — | 不存在（早期仅在本地以 `@local/dsh-decision` 链接安装） |
+
+升级约定：插件小版本只加能力，不改 `decision_ask` 的参数形状；`answers` 字段跟随上游 API。
+
+<a id="10-5-发布与安装形态"></a>
+### 10.5 发布与安装形态
+
+| 形态 | 命令 | 适用 |
+|---|---|---|
+| 本地目录（开发） | `plugin_manager install_bundle target=<绝对路径>` | 改代码即时生效（link） |
+| npm 包 | `plugin_manager install_bundle target=@xia-sc/dsh-decision` | 分发、多机安装 |
+| 发布 | push `v*` tag → GitHub Actions | 见 `.github/workflows/publish.yml` |
+
+**发布到 npm**（`.github/workflows/publish.yml`）有两种凭据方式，任选其一：
+
+- **A. `NPM_TOKEN` secret（推荐先走这条）**：在 npmjs.com 建一个 granular token（scope 为 `@xia-sc`、权限 publish），加到仓库 `Settings → Secrets and variables → Actions → NPM_TOKEN`。
+- **B. Trusted Publishing（OIDC，无 token）**：包在 npm 上存在后，在包设置里配 GitHub trusted publisher：repository `xia-sc/dsh-decision`、workflow file `publish.yml`。workflow 已带 `id-token: write` 并升级到 npm ≥ 11.5，自动用 OIDC 出证。
+
+首次发布（包还不存在时只能走 A）：
+
+```bash
+npm login                     # npm 用户需为 xia-sc（或 @xia-sc 组织成员）
+npm publish --access public   # 或在 GitHub 配好 NPM_TOKEN 后打 tag 触发
+```
+
+之后每次发版：
+
+```bash
+npm version patch            # 更新 package.json 版本并打 tag
+git push origin main --tags  # 触发 workflow；tag 必须与 package.json 版本一致
+```
+
+`scripts/preflight.mjs` 会在发布前检查：必需文件齐全、包名是 `@xia-sc/dsh-decision`、`private` 未开启、`publishConfig.access = "public"`、`client.js` 的 module id 与包名一致、无 API Key / 本机路径、两个 JS 文件语法正确。
+
+<a id="10-6-已知不兼容"></a>
+### 10.6 已知不兼容 / 限制
+
+- **TUI / headless / ACP**：没有 Client slots，设置页与卡片不出现；`decision_ask`、`decision_info` 与路由照常可用。
+- **桌面端（Electron）**：改 Client bundle 后必须整页重载（`Ctrl+R`）或重启应用；只重载 Host 不会刷新前端。
+- **Harness < 0.2.0**：`ctx.inject` 的用法与 slot 名称可能不同，未验证。
+- 插件不注册任何 slash command、不改 agent preset，也不注入 system prompt。

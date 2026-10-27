@@ -1,5 +1,5 @@
 /**
- * @local/dsh-decision — Host half.
+ * @xia-sc/dsh-decision — Host half.
  *
  * Registers two agent tools and a small same-origin HTTP surface for the
  * Client half (Settings page + decision card):

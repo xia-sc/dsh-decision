@@ -1,8 +1,7 @@
 {
-  "name": "@local/dsh-decision",
+  "name": "@xia-sc/dsh-decision",
   "version": "0.1.0",
-  "private": true,
-  "description": "Decision 3.0 多模态决策模型接入：概率决策、图像定位与配额管理",
+  "description": "Decision 3.0 multimodal decision models for DeepSeek Harness: calibrated-probability tools, a Settings page and a probability-bar card",
   "license": "MIT",
   "homepage": "https://github.com/xia-sc/dsh-decision#readme",
   "repository": {
@@ -17,8 +16,12 @@
     "dsh-plugin",
     "deepseek-harness",
     "decision-model",
-    "vllm-sr"
+    "vllm-sr",
+    "multimodal"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -35,6 +38,13 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js",
+    "prepublishOnly": "node scripts/preflight.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

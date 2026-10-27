@@ -1,13 +1,14 @@
 # ============================================================================
-# @local/dsh-decision —— DSH bundle patch
+# @xia-sc/dsh-decision —— DSH bundle patch
 # ============================================================================
 # 把 Decision 3.0 插件（Agent 工具 + 设置页 + 决策卡片）插入当前 profile。
 # 安装：
-#   plugin_manager -> install_bundle -> target: <本目录绝对路径>
+#   plugin_manager -> install_bundle -> target: <本目录绝对路径>   （本地目录）
+#   plugin_manager -> install_bundle -> target: @xia-sc/dsh-decision （npm 包）
 # 参数（API key、默认模型）不在这里：通过 Settings -> Decision 页面管理，
 # 密钥存进 DSH 凭据（ref: DECISION_API_KEY），默认模型存 $DSH_HOME/.dsh-decision.json。
 # ============================================================================
 
 - insert:
     - id: dsh-decision
-      name: '@local/dsh-decision'
+      name: '@xia-sc/dsh-decision'

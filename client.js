@@ -1,5 +1,5 @@
 /**
- * @local/dsh-decision — Client half.
+ * @xia-sc/dsh-decision — Client half.
  *
  * Registers two slots:
  *   settings.section     — the Decision settings page (key, default model, quota)
@@ -10,7 +10,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-decision',
+  id: '@xia-sc/dsh-decision',
   factory(require) {
     const React = require('react')
     const h = React.createElement
