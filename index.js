@@ -549,7 +549,6 @@ const resultCache = new Map()
 const RESULTS_PATH = join(DSH_HOME, '.dsh-decision-results.json')
 let resultsLoaded = false
 let persistTimer = null
-let persistRunning = false
 
 /** Load the persisted cards once; a missing or unreadable store simply starts empty. */
 async function loadResults() {
@@ -569,6 +568,16 @@ async function loadResults() {
   } catch {
     // no store yet, or an unreadable one: keep the empty cache
   }
+}
+
+/**
+ * Re-read the store. Another Host process — or this one before its last reload —
+ * may have written entries since the first load, and a cache hit must not depend
+ * on which process executed the tool.
+ */
+async function reloadResults() {
+  resultsLoaded = false
+  await loadResults()
 }
 
 function pruneResults(now) {
@@ -591,25 +600,28 @@ function schedulePersist() {
   if (typeof persistTimer.unref === 'function') persistTimer.unref()
 }
 
-/** Persist the card values so cards stay rendered after a Host restart. */
-async function persistResults() {
-  if (persistRunning) return
-  persistRunning = true
-  try {
-    const now = Date.now()
-    pruneResults(now)
-    const entries = [...resultCache]
-      .map(([callId, entry]) => ({ callId, at: entry.at, value: entry.value }))
-      .sort((a, b) => a.at - b.at)
-    await mkdir(dirname(RESULTS_PATH), { recursive: true })
-    const tmp = `${RESULTS_PATH}.${process.pid}.${Date.now()}.tmp`
-    await writeFile(tmp, `${JSON.stringify({ version: 1, entries })}\n`, { encoding: 'utf8', mode: 0o600 })
-    await rename(tmp, RESULTS_PATH)
-  } catch {
-    // best-effort: the tool text in the session log always remains authoritative
-  } finally {
-    persistRunning = false
-  }
+/**
+ * Persist the card values so cards stay rendered after a Host restart. Writes are
+ * serialized on a chain: a caller that arrives mid-write waits for the next write
+ * instead of being dropped (the old "already running" branch lost results).
+ */
+let persistChain = Promise.resolve()
+
+function persistResults() {
+  persistChain = persistChain.then(writeSnapshot, writeSnapshot)
+  return persistChain
+}
+
+async function writeSnapshot() {
+  const now = Date.now()
+  pruneResults(now)
+  const entries = [...resultCache]
+    .map(([callId, entry]) => ({ callId, at: entry.at, value: entry.value }))
+    .sort((a, b) => a.at - b.at)
+  await mkdir(dirname(RESULTS_PATH), { recursive: true })
+  const tmp = `${RESULTS_PATH}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmp, `${JSON.stringify({ version: 1, entries })}\n`, { encoding: 'utf8', mode: 0o600 })
+  await rename(tmp, RESULTS_PATH)
 }
 
 function rememberResult(callId, value) {
@@ -622,7 +634,12 @@ function rememberResult(callId, value) {
 
 async function recallResult(callId) {
   await loadResults()
-  const entry = resultCache.get(callId)
+  let entry = resultCache.get(callId)
+  if (!entry) {
+    // A different Host process may have executed the tool; re-read once before giving up.
+    await reloadResults()
+    entry = resultCache.get(callId)
+  }
   if (!entry) return null
   if (Date.now() - entry.at > CACHE_TTL_MS) {
     resultCache.delete(callId)
@@ -785,6 +802,9 @@ function registerTools(ctx) {
       }
       await loadResults()
       rememberResult(exec.callId, value)
+      // Persist before returning: a restart inside the debounce window used to lose
+      // the card payload for good.
+      await persistResults().catch(() => {})
       return value
     },
   })
@@ -948,6 +968,7 @@ async function buildStatus(ctx, options = {}) {
       serverOrigin: currentServerOrigin(ctx),
       recentRequests: recentRequests.slice(-6),
       clientReports: clientReports.slice(-12),
+      recentResultLookups: resultLookups.slice(-10),
     },
   }
   statusCache = { at: Date.now(), value }
@@ -1004,6 +1025,17 @@ function currentServerOrigin(ctx) {
 const recentRequests = []
 /** Client-side render/fetch reports, so a broken card is diagnosable from the Host. */
 const clientReports = []
+/** Card lookups by callId, hit or miss — "result is no longer cached" must be explainable. */
+const resultLookups = []
+
+function noteResultLookup(callId, found) {
+  try {
+    resultLookups.push({ at: new Date().toISOString(), callId: String(callId).slice(0, 80), found: Boolean(found) })
+    if (resultLookups.length > 20) resultLookups.shift()
+  } catch {
+    // diagnostics only
+  }
+}
 
 function rememberClientReport(payload) {
   try {
@@ -1189,6 +1221,7 @@ function registerRoutes(ctx, webServer) {
         }
         if (!callId) return sendJson(res, 400, { error: 'callId is required' })
         const value = await recallResult(callId)
+        noteResultLookup(callId, value)
         if (!value) return sendJson(res, 404, { error: 'result is no longer cached' })
         return sendJson(res, 200, { callId, value })
       },

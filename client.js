@@ -614,12 +614,17 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState({ loading: true, value: null, error: null })
       const cardRef = React.useRef(null)
 
-      // The card reports only failures to the Host; a healthy render stays silent.
+      // While the tool is still running the Host has not cached the result yet, so a
+      // card mounted during `start` used to miss and never retry. Re-ask when the
+      // phase advances, and retry once shortly after a miss.
       useEffect(() => {
         if (!callId) return undefined
         let alive = true
-        setState((current) => ({ ...current, loading: true }))
-        ;(async () => {
+        let retryTimer = null
+        let retried = false
+
+        const load = async () => {
+          setState((current) => ({ ...current, loading: current.value === null }))
           try {
             const res = await fetch(`/dsh-decision/result?callId=${encodeURIComponent(callId)}`, {
               headers: { accept: 'application/json' },
@@ -633,7 +638,13 @@ window.__ModuleLoader__.load({
                 status: res.status,
                 message: (json && json.error) || '',
               })
-              setState({ loading: false, value: null, error: (json && json.error) || null })
+              setState((current) => ({ ...current, loading: false, error: (json && json.error) || null }))
+              if (!retried) {
+                retried = true
+                retryTimer = setTimeout(() => {
+                  if (alive) load()
+                }, 1500)
+              }
               return
             }
             setState({ loading: false, value: json.value, error: null })
@@ -644,13 +655,20 @@ window.__ModuleLoader__.load({
               callId,
               message: error && error.message ? error.message : String(error),
             })
-            setState({ loading: false, value: null, error: error && error.message ? error.message : String(error) })
+            setState((current) => ({
+              ...current,
+              loading: false,
+              error: error && error.message ? error.message : String(error),
+            }))
           }
-        })()
+        }
+
+        load()
         return () => {
           alive = false
+          if (retryTimer) clearTimeout(retryTimer)
         }
-      }, [callId])
+      }, [callId, phase])
 
       if (state.loading) {
         return h(React.Fragment, null, [

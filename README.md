@@ -195,10 +195,11 @@ plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 
 卡片不解析工具文本，而是按 `callId` 向 Host 要**结构化结果**：
 
-- 工具执行成功时 `rememberResult(exec.callId, value)`；
-- 卡片挂载后 `GET /dsh-decision/result?callId=…`；
+- 工具执行成功时 `rememberResult(exec.callId, value)`，并**立即落盘**（不再依赖防抖窗口）；
+- 卡片挂载后 `GET /dsh-decision/result?callId=…`。注意卡片可能在工具**尚未执行完**时挂载，这时 Host 还没有这份结果：因此卡片在 `phase` 变为 `result` 时重新请求，并在 miss 后 1.5 秒重试一次；
+- Host 侧缓存 miss 时会**重新读取磁盘**（另一个进程或重载前写入的条目也能命中）；
 - 结果按 200 条 / 1 小时保留，并持久化到 `$DSH_HOME/.dsh-decision-results.json`，**重启后历史卡片仍能回放**；
-- 取不到（过期 / 被淘汰 / 非本机产生）时显示「详细结果不可用 · call xxxx」，工具文本仍在会话里，所以不会丢信息。
+- 仍取不到（过期 / 被淘汰）时显示「详细结果不可用 · call xxxx」，工具文本仍在会话里，所以不会丢信息；`GET /dsh-decision/status` 的 `diagnostics.recentResultLookups` 会记录每次查询是否命中。
 
 <a id="3-4-设置页"></a>
 ### 3.4 设置页如何读写配置
