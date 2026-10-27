@@ -5,12 +5,11 @@ name: publish
 # Trigger: push a `v*` tag whose name matches package.json's version, or run the
 # workflow manually from the Actions tab.
 #
-# Authentication: add the repository secret NPM_TOKEN (npm token with publish on
-# the @xia-sc scope — classic "Automation" token, or a granular token with
-# "Bypass 2FA" ticked). To switch to npm Trusted Publishing instead, delete the
-# NODE_AUTH_TOKEN line below and configure the trusted publisher on npmjs.com
-# (package → Settings → Trusted publishing → GitHub, repository
-# `xia-sc/dsh-decision`, workflow `publish.yml`).
+# Authentication: npm Trusted Publishing (OIDC) — configured on npmjs.com for
+# this package (Settings → Trusted publishing → GitHub, repository
+# `xia-sc/dsh-decision`, workflow `publish.yml`). No repository secret is needed;
+# `id-token: write` below lets npm exchange the GitHub OIDC token for a
+# short-lived publish credential and attach a provenance attestation.
 
 on:
   push:
@@ -63,8 +62,6 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to npm
+      - name: Publish to npm (Trusted Publishing / OIDC)
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

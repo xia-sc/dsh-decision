@@ -68,21 +68,18 @@ Host 端零 npm 依赖、无需构建；安装后整页刷新（`Ctrl+R`）即�
 <a id="2-1-给-Agent-的安装步骤"></a>
 ### 2.1 给 Agent 的安装与验证步骤
 
-这一节写给**执行安装的 Agent**：每步都有可判断的成功标志和失败处理，不要跳过验证步骤，也不要把 API Key 写进任何文件。
+写给**执行安装的 Agent**：从 npm 安装，然后逐项验证。不要跳过验证，也不要把 API Key 写进任何文件。
 
-**第 0 步 — 前置检查**
-
-- 确认插件目录是本包根（同时存在 `package.json`、`cordis.patch.yml`、`index.js`、`client.js`），记下它的**绝对路径** `<PLUGIN_DIR>`。
-- 确认 `package.json` 的 `name` 是 `@xia-sc/dsh-decision`，`dsh.bundle.patch` 指向 `./cordis.patch.yml`。
-- 不需要 `npm install`、不需要构建（Host 零依赖，Client 只 `require('react')`）。
-
-**第 1 步 — 安装 bundle**
+**第 1 步 — 从 npm 安装**
 
 ```text
-plugin_manager(action: "install_bundle", target: "<PLUGIN_DIR>")
+plugin_manager(action: "install_bundle", target: "@xia-sc/dsh-decision")
 ```
 
-成功标志：返回 `"application": "applied"`（若为 `restart-required`，提示用户重启 Harness；若为 `failed`，读 `error.code` 后停止，不要重复安装）。
+成功标志：`application: "applied"`，且返回的 `bundle` 是 `@xia-sc/dsh-decision`。
+
+- `restart-required`：告诉用户重启 Harness 后继续。
+- `failed`：读 `error.code` 后停止，不要重复安装。
 
 **第 2 步 — 确认工具已注册**
 
@@ -90,33 +87,28 @@ plugin_manager(action: "install_bundle", target: "<PLUGIN_DIR>")
 cordis_inspect_query(platform: "host", provider: "Tool", method: "listTools")
 ```
 
-成功标志：结果里同时出现 `decision_ask` 与 `decision_info`。这两个是免审批的只读查询，优先用它而不是 `list_plugins`。
+成功标志：结果里出现 `decision_ask` 与 `decision_info`。
 
-**第 3 步 — 确认 Client 半区已加载**
+**第 3 步 — 确认 UI 半区已加载**
 
 ```text
 cordis_inspect_query(platform: "client", provider: "Slots", method: "listSubTree",
                      input: { "root": "settings.section" })
 ```
 
-成功标志：`occupants` 里出现 `id: "dsh-decision", order: 60, active: true`；再查 `root: "tool.call.toolview"`，`occupants` 里出现 `key: "decision_ask"`。
+成功标志：`occupants` 里含 `id: "dsh-decision"`（`active: true`）；再查 `root: "tool.call.toolview"`，`occupants` 里含 `key: "decision_ask"`。
+缺失 → 让用户整页重载（`Ctrl+R`）后再查。
 
-若 Host 通过但这里缺失：Client bundle 没加载，让用户**整页重载**（`Ctrl+R`）后再查；仍缺失则检查 `client.js` 语法与 `dsh.client` 字段。
-
-**第 4 步 — 确认同源路由已注册**
-
-取当前 webServer 端口（GUI URL 的端口，或 `webApp.getAdvertisedUrl()`），然后：
+**第 4 步 — 确认同源路由**
 
 ```text
 GET http://127.0.0.1:<PORT>/dsh-decision/status
 ```
 
-成功标志：`200`，响应是 JSON 且含 `models` 数组、`keyConfigured`、`diagnostics`。
+成功标志：`200`，JSON 含 `models`、`keyConfigured`。
+`404/405` → 路由未注册：把该 row `enabled: false` 再 `true` 重试；`403` → 用回环地址，不要带跨站 `Origin`。
 
-- `404/405` → 路由未注册（冷启动竞态）：`plugin_manager` 里对该 row 先 `enabled: false` 再 `enabled: true`，重试。
-- `403` → 请求带了跨站标记或非回环 Host：用回环地址、不要伪造 `Origin`。
-
-**第 5 步 — 配置 API Key（需要用户提供）**
+**第 5 步 — 配置 API Key（向用户索取）**
 
 ```text
 POST http://127.0.0.1:<PORT>/dsh-decision/config
@@ -125,41 +117,29 @@ content-type: application/json
 { "apiKey": "sk-vsr-..." }
 ```
 
-成功标志：`200` 且返回的 `keyConfigured` 为 `true`、`keyPrefix` 是掩码（`sk-vsr-abc…yz`）。
-`400 key rejected` 表示 key 无效或已吊销；`400 API key should look like…` 表示格式不对。**不要**把 key 写入 README、脚本、`cordis.patch.yml` 或 shell 历史。
+成功标志：`200` 且 `keyConfigured: true`、`keyPrefix` 为掩码。`400 key rejected` 表示 key 无效或已吊销；报告里只写掩码前缀。
 
-**第 6 步 — 端到端冒烟**
+**第 6 步 — 冒烟**
 
-1. 调用一次 `decision_ask`，最小参数：
+```jsonc
+{ "state": "ping", "questions": { "ok": { "type": "noul", "instructions": "Is this a test?" } } }
+```
 
-   ```jsonc
-   { "state": "ping", "questions": { "ok": { "type": "noul", "instructions": "Is this a test?" } } }
-   ```
-
-   成功标志：工具返回含 `answers.ok.noul`（0–1 之间）与 `usage.input_tokens`。
-2. 调用 `decision_info`（`action: "models"`），成功标志：返回 7 个模型与 limits。
-
-**第 7 步 — 报告**
-
-向用户报告：安装结果（`applied`）、工具是否可见、路由是否 200、Key 是否配置成功、冒烟结果；**只在报告里写 key 的掩码前缀**，不写原文。
+成功标志：`decision_ask` 返回 `answers.ok.noul`（0–1）与 `usage.input_tokens`；`decision_info(action: "models")` 返回 7 个模型。
 
 **回滚**
 
 ```text
-plugin_manager(action: "set_plugin", target: "<entryId>", enabled: false)
+plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 ```
 
-`<entryId>` 形如 `include:dsh-decision`（用 `list_plugins` 精确确认）。彻底移除用 `remove_bundle`。
+**验收清单**
 
-**验收清单（全部为“是”才算装好）**
-
-- [ ] `application: applied`
+- [ ] `application: applied`，bundle 为 `@xia-sc/dsh-decision`
 - [ ] `Tool.listTools` 含 `decision_ask` / `decision_info`
-- [ ] `settings.section` 有 `dsh-decision`、`tool.call.toolview` 有 `decision_ask`
+- [ ] `settings.section` 有 `dsh-decision`，`tool.call.toolview` 有 `decision_ask`
 - [ ] `GET /dsh-decision/status` 返回 200 且含 `models`
-- [ ] `keyConfigured: true`（用户提供了 key 时）
-- [ ] 一次 `decision_ask` 返回概率、一次 `decision_info models` 返回模型表
-
+- [ ] `keyConfigured: true`，冒烟返回概率
 <a id="3-工作原理"></a>
 ## 3. 工作原理
 
