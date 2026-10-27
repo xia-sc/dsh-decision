@@ -9,11 +9,13 @@
 
 - [1. 它做什么](#1-它做什么)
 - [2. 安装与配置](#2-安装与配置)
+  - [2.1 给 Agent 的安装与验证步骤](#2-1-给-Agent-的安装步骤)
 - [3. 工作原理](#3-工作原理)
 - [4. 什么时候触发](#4-什么时候触发)
 - [5. 如何实现](#5-如何实现)
 - [6. 工具参数与返回](#6-工具参数与返回)
 - [7. 服务端限制](#7-服务端限制)
+  - [7.1 性能实测](#7-1-性能实测)
 - [8. 排查](#8-排查)
 - [9. 已知边界](#9-已知边界)
 
@@ -245,8 +247,6 @@ DECISION_API_KEY 环境变量
 | 保存配置 | 点击「保存并验证」/「刷新」 | `POST /config`；「刷新」= 两个 GET 加 `?refresh=1` | 页面显示失败原因，不改动现有配置 |
 | 结果落盘 | 每次工具成功返回后 **800ms 防抖** | 原子写 `~/.dsh/.dsh-decision-results.json` | 写失败只影响回放，不影响调用 |
 | 客户端上报 | **仅异常**：取数失败或卡片渲染崩溃 | `POST /client-report` | 无影响（fire-and-forget） |
-| 结果落盘 | 每次工具成功返回后 **800ms 防抖** | 原子写 `~/.dsh/.dsh-decision-results.json` | 写失败只影响回放，不影响调用 |
-| 客户端上报 | **仅异常**：取数失败或卡片渲染崩溃 | `POST /client-report` | 无影响（fire-and-forget） |
 
 注意：**插件不改变模型的调度策略**，也不会自动替 Agent 决策；是否调用 `decision_ask` 完全由模型根据工具描述与任务判断。
 
@@ -258,7 +258,7 @@ DECISION_API_KEY 环境变量
 
 | 文件 | 职责 |
 |---|---|
-| `index.js` | Host：两个工具 + 四条同源路由 + Key/模型存储 + 媒体编码 + 结果缓存 |
+| `index.js` | Host：两个工具 + 五条同源路由 + Key/模型存储 + 媒体编码 + 结果缓存 |
 | `client.js` | Client：`settings.section` 设置页 + `tool.call.toolview` 决策卡片 + 错误边界 |
 | `cordis.patch.yml` | 插入 bundle 行（不写任何密钥） |
 | `locale/{zh,en}.json` | Plugins 页显示的标题与描述 |
@@ -321,7 +321,7 @@ ctx.tools.register({
 
 - 全部 `kind: 'exact'`，前缀 `/dsh-decision/`，`Cache-Control: no-store`。
 - `guardRequest`：要求 `Host` 解析为回环地址（`127.0.0.0/8`、`localhost`、`::1`）；拒绝 `Sec-Fetch-Site: cross-site`；有 `Origin` 时必须与 `Host` 同源。失败返回 403。
-- 方法限定：`status`/`result` 只允许 GET，`config`/`client-report` 只允许 POST，否则 405。
+- 方法限定：`status` / `usage` / `result` 只允许 GET，`config` / `client-report` 只允许 POST，否则 405。
 - 请求体上限 64 KB；响应**从不包含 Key 原文**，只有 `sk-vsr-AbCd…xYz` 这类掩码前缀。
 - Key 校验放在写入之前，验证失败不落库。
 
