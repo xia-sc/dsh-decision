@@ -2,16 +2,17 @@ name: publish
 
 # Publish @xia-sc/dsh-decision to npm.
 #
-# Two supported credential paths, in priority order:
-#   A) repository secret NPM_TOKEN — a granular npm token with "publish" on the
-#      @xia-sc scope. Simplest, works before the package exists on npm.
-#   B) npm Trusted Publishing (OIDC, no token) — configure it once on npmjs.com:
+# Credential paths, in priority order:
+#   A) repository secret NPM_TOKEN — a granular token (scope @xia-sc, Read and
+#      write, "Bypass 2FA" ticked) or a classic Automation token.
+#   B) npm Trusted Publishing (OIDC, no token) — configure once on npmjs.com:
 #      package → Settings → Trusted publishing → GitHub, repository
 #      `xia-sc/dsh-decision`, workflow file `publish.yml`. Requires npm >= 11.5
-#      (the step below upgrades it) and this repository to be public.
+#      (the step below upgrades it) and a public repository.
 #
-# Trigger: push a `v*` tag that matches package.json's version, or run the
-# workflow manually from the Actions tab.
+# Trigger: pushing a `v*` tag whose name matches package.json's version, or a
+# manual run from the Actions tab. Re-running for a version that is already on
+# npm is a no-op (see "Skip when this version is already published").
 
 on:
   push:
@@ -21,6 +22,10 @@ on:
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -39,22 +44,35 @@ jobs:
       - name: Preflight (files, package name, no secrets)
         run: node scripts/preflight.mjs
 
+      - name: Read package version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Tag must match package.json version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
-          pkg_version="$(node -p "require('./package.json').version")"
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+          if [ "$tag_version" != "${{ steps.version.outputs.value }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version ${{ steps.version.outputs.value }}"
             exit 1
           fi
 
+      - name: Skip when this version is already published
+        id: published
+        run: |
+          if npm view "@xia-sc/dsh-decision@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@xia-sc/dsh-decision@${{ steps.version.outputs.value }} is already on npm; nothing to publish."
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish with NPM_TOKEN
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: steps.published.outputs.value != 'true' && secrets.NPM_TOKEN != ''
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish with Trusted Publishing (OIDC)
-        if: ${{ secrets.NPM_TOKEN == '' }}
+        if: steps.published.outputs.value != 'true' && secrets.NPM_TOKEN == ''
         run: npm publish --access public --provenance

@@ -1,5 +1,10 @@
 # @xia-sc/dsh-decision
 
+[![npm version](https://img.shields.io/npm/v/@xia-sc/dsh-decision.svg)](https://www.npmjs.com/package/@xia-sc/dsh-decision)
+[![npm downloads](https://img.shields.io/npm/dm/@xia-sc/dsh-decision.svg)](https://www.npmjs.com/package/@xia-sc/dsh-decision)
+[![license](https://img.shields.io/npm/l/@xia-sc/dsh-decision.svg)](LICENSE)
+[![publish](https://github.com/xia-sc/dsh-decision/actions/workflows/publish.yml/badge.svg)](https://github.com/xia-sc/dsh-decision/actions/workflows/publish.yml)
+
 把 [Decision 3.0](https://decision.vllm-sr.ai/)（vLLM Semantic Router 的 System One 决策 API）接进 DeepSeek Harness：
 让 Agent 能对一段文本 / 图片 / 视频**问带选项的问题**，拿回的是**校准概率**而不是生成文本；同时在 Web UI 里给出可视化的概率条和设置页。
 
@@ -44,7 +49,7 @@
 ## 2. 安装与配置
 
 ```text
-# 从 npm 安装（发布后可用）
+# 从 npm 安装（已发布：https://www.npmjs.com/package/@xia-sc/dsh-decision）
 plugin_manager action=install_bundle target=@xia-sc/dsh-decision
 
 # 或者从本地目录安装（开发：link 到本目录，改代码即时生效）
@@ -502,24 +507,23 @@ node .bench/probe2.mjs
 | npm 包 | `plugin_manager install_bundle target=@xia-sc/dsh-decision` | 分发、多机安装 |
 | 发布 | push `v*` tag → GitHub Actions | 见 `.github/workflows/publish.yml` |
 
-**发布到 npm**（`.github/workflows/publish.yml`）有两种凭据方式，任选其一：
+**发布到 npm**：`0.1.0` 已由本地发布（2026-10-27），之后的版本交给 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)。workflow 有两条凭据路径，任选其一：
 
-- **A. `NPM_TOKEN` secret（推荐先走这条）**：在 npmjs.com 建一个 granular token（scope 为 `@xia-sc`、权限 publish），加到仓库 `Settings → Secrets and variables → Actions → NPM_TOKEN`。
-- **B. Trusted Publishing（OIDC，无 token）**：包在 npm 上存在后，在包设置里配 GitHub trusted publisher：repository `xia-sc/dsh-decision`、workflow file `publish.yml`。workflow 已带 `id-token: write` 并升级到 npm ≥ 11.5，自动用 OIDC 出证。
+- **A. `NPM_TOKEN` secret**：npmjs.com 建 token（granular：scope `@xia-sc`、Read and write、勾选 **Bypass 2FA**；或 classic **Automation** token），加到仓库 `Settings → Secrets and variables → Actions → NPM_TOKEN`。
+- **B. Trusted Publishing（OIDC，无 token，带 provenance）**：包已存在后，在 npm 包页面 `Settings → Trusted publishing` 添加 GitHub：repository `xia-sc/dsh-decision`、workflow file `publish.yml`。workflow 已带 `id-token: write` 且会升级到 npm ≥ 11.5。
 
-首次发布（包还不存在时只能走 A）：
-
-```bash
-npm login                     # npm 用户需为 xia-sc（或 @xia-sc 组织成员）
-npm publish --access public   # 或在 GitHub 配好 NPM_TOKEN 后打 tag 触发
-```
-
-之后每次发版：
+发版流程：
 
 ```bash
-npm version patch            # 更新 package.json 版本并打 tag
-git push origin main --tags  # 触发 workflow；tag 必须与 package.json 版本一致
+npm version patch            # 0.1.0 → 0.1.1，自动 commit 并打 v0.1.1 tag
+git push origin main --tags  # 触发 workflow：preflight → 校验 tag 与版本一致 → 发布
 ```
+
+workflow 的行为：
+
+- tag 与 `package.json` 版本不一致 → 直接失败（不发布）；
+- 该版本**已存在于 npm** → 输出 notice 并跳过发布（所以给已发布版本补 tag 不会产生失败记录）；
+- 没有任何凭据（既无 `NPM_TOKEN` 也未配 Trusted Publishing）→ 发布步骤失败，日志会写明认证错误。
 
 `scripts/preflight.mjs` 会在发布前检查：必需文件齐全、包名是 `@xia-sc/dsh-decision`、`private` 未开启、`publishConfig.access = "public"`、`client.js` 的 module id 与包名一致、无 API Key / 本机路径、两个 JS 文件语法正确。
 
