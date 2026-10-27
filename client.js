@@ -611,6 +611,7 @@ window.__ModuleLoader__.load({
     function DecisionCard(props) {
       const t = props.dsdTranslate
       const callId = props && typeof props.callId === 'string' ? props.callId : ''
+      const phase = props && typeof props.phase === 'string' ? props.phase : 'start'
       const [state, setState] = useState({ loading: true, value: null, error: null })
       const cardRef = React.useRef(null)
 

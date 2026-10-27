@@ -40,6 +40,16 @@ for (const file of ['README.md', 'index.js', 'client.js']) {
   if (/C:\/Users\/|[A-Z]:\\\\dsh\\\\/i.test(text)) problems.push(`${file} contains a machine-specific path`)
 }
 
+// Render every registered component with a React stub: catches runtime
+// ReferenceErrors that `node --check` cannot see (e.g. a missing variable in a
+// hook dependency array), which would otherwise only appear as a crashed card.
+try {
+  execFileSync(process.execPath, ['scripts/smoke-client.mjs'], { stdio: 'pipe' })
+} catch (error) {
+  const detail = String(error.stderr || error.message || '').trim().split('\n').slice(-3).join(' ')
+  problems.push(`client smoke failed: ${detail}`)
+}
+
 if (problems.length > 0) {
   console.error('preflight failed:')
   for (const problem of problems) console.error(`- ${problem}`)
