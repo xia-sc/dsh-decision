@@ -43,11 +43,17 @@ for (const file of ['README.md', 'index.js', 'client.js']) {
 // Render every registered component with a React stub: catches runtime
 // ReferenceErrors that `node --check` cannot see (e.g. a missing variable in a
 // hook dependency array), which would otherwise only appear as a crashed card.
-try {
-  execFileSync(process.execPath, ['scripts/smoke-client.mjs'], { stdio: 'pipe' })
-} catch (error) {
-  const detail = String(error.stderr || error.message || '').trim().split('\n').slice(-3).join(' ')
-  problems.push(`client smoke failed: ${detail}`)
+// The data-dir smoke covers the on-disk layout and the legacy dotfile migration.
+for (const [label, script] of [
+  ['client', 'scripts/smoke-client.mjs'],
+  ['data dir', 'scripts/smoke-data-dir.mjs'],
+]) {
+  try {
+    execFileSync(process.execPath, [script], { stdio: 'pipe' })
+  } catch (error) {
+    const detail = String(error.stderr || error.message || '').trim().split('\n').slice(-3).join(' ')
+    problems.push(`${label} smoke failed: ${detail}`)
+  }
 }
 
 if (problems.length > 0) {

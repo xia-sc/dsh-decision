@@ -13,12 +13,12 @@
  *
  * No npm dependencies: only node: builtins and cordis ctx services. The API
  * key lives in `ctx.credentials` (ref DECISION_API_KEY) with a $DSH_HOME file
- * fallback; the default model lives in $DSH_HOME/.dsh-decision.json.
+ * fallback; every file the plugin owns sits in $DSH_HOME/dsh-decision/.
  */
 
-import { readFile, writeFile, mkdir, rename, chmod } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename, chmod, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 export const name = 'dsh-decision'
 
@@ -26,7 +26,6 @@ const DEFAULT_BASE_URL = 'https://decision.vllm-sr.ai'
 const DEFAULT_MODEL = 'vllm-sr/d3-flash'
 const KEY_REF = 'DECISION_API_KEY'
 const ROUTE_PREFIX = '/dsh-decision'
-const SETTINGS_BASENAME = '.dsh-decision.json'
 const INFO_TTL_MS = 600_000
 const CACHE_LIMIT = 200
 const CACHE_TTL_MS = 60 * 60_000
@@ -39,7 +38,15 @@ const MAX_IMAGES = 4
 const MAX_VIDEOS = 1
 
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
-const SETTINGS_PATH = join(DSH_HOME, SETTINGS_BASENAME)
+
+// Every file this plugin owns lives in one directory, so $DSH_HOME itself stays
+// clean: $DSH_HOME/dsh-decision/{config.json,results.json}. 0.1.0-0.1.3 wrote
+// two dotfiles straight into $DSH_HOME; the first use migrates and removes them.
+const DATA_DIR = join(DSH_HOME, 'dsh-decision')
+const SETTINGS_PATH = join(DATA_DIR, 'config.json')
+const RESULTS_PATH = join(DATA_DIR, 'results.json')
+const LEGACY_SETTINGS_PATH = join(DSH_HOME, '.dsh-decision.json')
+const LEGACY_RESULTS_PATH = join(DSH_HOME, '.dsh-decision-results.json')
 
 const IMAGE_MIME = {
   '.png': 'image/png',
@@ -60,6 +67,56 @@ const VIDEO_MAX_BYTES = 32 * 1024 * 1024
 const QUESTION_TYPES = ['choice', 'noul', 'score', 'box']
 
 // ---------------------------------------------------------------------------
+// data directory (created on demand; legacy dotfiles migrated once)
+// ---------------------------------------------------------------------------
+
+let dataDirReady = null
+
+/** Idempotent, cheap after the first call. */
+function ensureDataDir() {
+  if (!dataDirReady) {
+    dataDirReady = migrateLegacyData().catch(() => {
+      dataDirReady = null // let the next call retry (e.g. transient EPERM)
+    })
+  }
+  return dataDirReady
+}
+
+async function migrateLegacyData() {
+  await mkdir(DATA_DIR, { recursive: true })
+  await migrateLegacyFile(LEGACY_SETTINGS_PATH, SETTINGS_PATH)
+  await migrateLegacyFile(LEGACY_RESULTS_PATH, RESULTS_PATH)
+}
+
+/**
+ * Move one pre-0.1.4 dotfile into the data directory. If the destination already
+ * exists we keep the old file as a backup under dsh-decision/legacy/ rather than
+ * dropping data; either way the dotfile leaves $DSH_HOME.
+ */
+async function migrateLegacyFile(from, to) {
+  let raw
+  try {
+    raw = await readFile(from, 'utf8')
+  } catch {
+    return // nothing to migrate
+  }
+  let targetExists = true
+  try {
+    await readFile(to, 'utf8')
+  } catch {
+    targetExists = false
+  }
+  if (targetExists) {
+    const backup = join(DATA_DIR, 'legacy', `${basename(from)}.bak`)
+    await mkdir(dirname(backup), { recursive: true })
+    await writeFile(backup, raw, { encoding: 'utf8', mode: 0o600 })
+  } else {
+    await writeFile(to, raw, { encoding: 'utf8', mode: 0o600 })
+  }
+  await rm(from, { force: true })
+}
+
+// ---------------------------------------------------------------------------
 // settings file (default model only; the key normally lives in credentials)
 // ---------------------------------------------------------------------------
 
@@ -67,6 +124,7 @@ let settingsCache = null
 
 async function readSettings() {
   if (settingsCache) return settingsCache
+  await ensureDataDir()
   let raw = null
   try {
     raw = await readFile(SETTINGS_PATH, 'utf8')
@@ -150,6 +208,7 @@ async function saveApiKey(ctx, apiKey) {
     return 'credentials'
   }
   // Fallback: keep it beside the default model, owner-readable only.
+  await ensureDataDir()
   let raw = {}
   try {
     const value = JSON.parse(await readFile(SETTINGS_PATH, 'utf8'))
@@ -546,7 +605,6 @@ function formatInfo(value) {
 // ---------------------------------------------------------------------------
 
 const resultCache = new Map()
-const RESULTS_PATH = join(DSH_HOME, '.dsh-decision-results.json')
 let resultsLoaded = false
 let persistTimer = null
 
@@ -554,6 +612,7 @@ let persistTimer = null
 async function loadResults() {
   if (resultsLoaded) return
   resultsLoaded = true
+  await ensureDataDir()
   try {
     const raw = await readFile(RESULTS_PATH, 'utf8')
     const parsed = JSON.parse(raw)
@@ -618,6 +677,7 @@ async function writeSnapshot() {
   const entries = [...resultCache]
     .map(([callId, entry]) => ({ callId, at: entry.at, value: entry.value }))
     .sort((a, b) => a.at - b.at)
+  await ensureDataDir()
   await mkdir(dirname(RESULTS_PATH), { recursive: true })
   const tmp = `${RESULTS_PATH}.${process.pid}.${Date.now()}.tmp`
   await writeFile(tmp, `${JSON.stringify({ version: 1, entries })}\n`, { encoding: 'utf8', mode: 0o600 })

@@ -1,6 +1,6 @@
 {
   "name": "@xia-sc/dsh-decision",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Decision 3.0 multimodal decision models for DeepSeek Harness: calibrated-probability tools, a Settings page and a probability-bar card",
   "license": "MIT",
   "homepage": "https://github.com/xia-sc/dsh-decision#readme",

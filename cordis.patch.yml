@@ -6,7 +6,8 @@
 #   plugin_manager -> install_bundle -> target: <本目录绝对路径>   （本地目录）
 #   plugin_manager -> install_bundle -> target: @xia-sc/dsh-decision （npm 包）
 # 参数（API key、默认模型）不在这里：通过 Settings -> Decision 页面管理，
-# 密钥存进 DSH 凭据（ref: DECISION_API_KEY），默认模型存 $DSH_HOME/.dsh-decision.json。
+# 密钥存进 DSH 凭据（ref: DECISION_API_KEY），默认模型存 $DSH_HOME/dsh-decision/config.json。
+# 插件自己的全部文件都在 $DSH_HOME/dsh-decision/ 下，不往 $DSH_HOME 根目录写东西。
 # ============================================================================
 
 - insert:

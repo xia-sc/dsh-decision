@@ -61,9 +61,14 @@ Host 端零 npm 依赖、无需构建；安装后整页刷新（`Ctrl+R`）即�
 | 项目 | 位置 | 默认值 |
 |---|---|---|
 | API Key | DSH 凭据 `DECISION_API_KEY`（设置页写入），或环境变量 `DECISION_API_KEY` | 无（未配置时工具返回可读错误） |
-| 默认模型 | `$DSH_HOME/.dsh-decision.json` 的 `model` | `vllm-sr/d3-flash` |
-| 服务地址 | `$DSH_HOME/.dsh-decision.json` 的 `baseUrl` | `https://decision.vllm-sr.ai` |
-| 卡片结果缓存 | `$DSH_HOME/.dsh-decision-results.json` | 200 条 / 1 小时，自动清理 |
+| 默认模型 | `$DSH_HOME/dsh-decision/config.json` 的 `model` | `vllm-sr/d3-flash` |
+| 服务地址 | `$DSH_HOME/dsh-decision/config.json` 的 `baseUrl` | `https://decision.vllm-sr.ai` |
+| 卡片结果缓存 | `$DSH_HOME/dsh-decision/results.json` | 200 条 / 1 小时，自动清理 |
+
+> **数据目录**：插件写入的文件全部集中在 `$DSH_HOME/dsh-decision/`，`$DSH_HOME` 根目录保持干净。
+> 从 0.1.3 及更早升级时，第一次调用会把根目录下的 `.dsh-decision.json` / `.dsh-decision-results.json`
+> 自动迁进该目录并删除旧文件；若新旧文件同时存在（例如手工复制过），旧文件会备份到
+> `dsh-decision/legacy/` 而不是被丢弃。
 
 <a id="2-1-给-Agent-的安装步骤"></a>
 ### 2.1 给 Agent 的安装与验证步骤
@@ -160,7 +165,7 @@ plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 │  │    GET  /dsh-decision/result?callId  卡片取结构化结果           │
 │  │    POST /dsh-decision/client-report  客户端异常上报（仅异常）    │
 │  ├─ 密钥：ctx.credentials(REF) → env → 文件                        │
-│  └─ 缓存：内存 Map + $DSH_HOME/.dsh-decision-results.json          │
+│  └─ 缓存：内存 Map + $DSH_HOME/dsh-decision/results.json          │
 │                          │ fetch /v1/systemone（带 X-API-Key）     │
 └──────────────────────────┼────────────────────────────────────────┘
                            ▼
@@ -198,7 +203,7 @@ plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 - 工具执行成功时 `rememberResult(exec.callId, value)`，并**立即落盘**（不再依赖防抖窗口）；
 - 卡片挂载后 `GET /dsh-decision/result?callId=…`。注意卡片可能在工具**尚未执行完**时挂载，这时 Host 还没有这份结果：因此卡片在 `phase` 变为 `result` 时重新请求，并在 miss 后 1.5 秒重试一次；
 - Host 侧缓存 miss 时会**重新读取磁盘**（另一个进程或重载前写入的条目也能命中）；
-- 结果按 200 条 / 1 小时保留，并持久化到 `$DSH_HOME/.dsh-decision-results.json`，**重启后历史卡片仍能回放**；
+- 结果按 200 条 / 1 小时保留，并持久化到 `$DSH_HOME/dsh-decision/results.json`，**重启后历史卡片仍能回放**；
 - 仍取不到（过期 / 被淘汰）时显示「详细结果不可用 · call xxxx」，工具文本仍在会话里，所以不会丢信息；`GET /dsh-decision/status` 的 `diagnostics.recentResultLookups` 会记录每次查询是否命中。
 
 <a id="3-4-设置页"></a>
@@ -215,7 +220,7 @@ plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 **写**：
 
 - 填写 Key → `POST /config`：Host 先用 `/api/keys/self` **验证该 Key**，成功才 `credentials.set`；失败返回 400 与原因。
-- 选择模型 → 同一个 `POST /config`：校验它在 `/api/info` 的模型列表里，然后原子写入 `$DSH_HOME/.dsh-decision.json`。
+- 选择模型 → 同一个 `POST /config`：校验它在 `/api/info` 的模型列表里，然后原子写入 `$DSH_HOME/dsh-decision/config.json`。
 - 保存成功后 Host 使缓存失效并返回最新 status + usage，页面直接应用，不再多打一轮请求。
 
 **为什么拆成 `/status` 与 `/usage`**：`/api/info` 冷启动要 4–5 秒、配额接口约 0.8–2.5 秒，而模型表/Key 状态是页面的主体。拆开后主体先出来，配额随后补齐；再叠加两级缓存（Host 20 秒 + 浏览器上次快照），重复进入设置页基本是瞬时的。
@@ -226,7 +231,7 @@ plugin_manager(action: "remove_bundle", target: "@xia-sc/dsh-decision")
 ```text
 DECISION_API_KEY 环境变量
   → DSH 凭据 DECISION_API_KEY（ctx.credentials.resolve，返回 { value, source }）
-  → $DSH_HOME/.dsh-decision.json 的 apiKey（无 credentials 服务时的兜底写入位置）
+  → $DSH_HOME/dsh-decision/config.json 的 apiKey（无 credentials 服务时的兜底写入位置）
 ```
 
 默认模型每次调用时读取（`readSettings` 有进程内缓存，写入后失效），所以改完设置立刻生效，不需要重启。
@@ -242,7 +247,7 @@ DECISION_API_KEY 环境变量
 | 设置页加载 | 打开 Settings → 决策模型 | 先用 `localStorage` 快照立即渲染，再 `GET /status`（Host 20s 缓存） | 保留旧数据 + 一行错误提示 |
 | 设置页用量 | `/status` 到达后立刻发起 | `GET /usage`（上游慢，独立请求，12s 超时） | 保留旧用量；失败不阻塞页面 |
 | 保存配置 | 点击「保存并验证」/「刷新」 | `POST /config`；「刷新」= 两个 GET 加 `?refresh=1` | 页面显示失败原因，不改动现有配置 |
-| 结果落盘 | 每次工具成功返回后 **800ms 防抖** | 原子写 `~/.dsh/.dsh-decision-results.json` | 写失败只影响回放，不影响调用 |
+| 结果落盘 | 每次工具成功返回后 **800ms 防抖** | 原子写 `~/.dsh/dsh-decision/results.json` | 写失败只影响回放，不影响调用 |
 | 客户端上报 | **仅异常**：取数失败或卡片渲染崩溃 | `POST /client-report` | 无影响（fire-and-forget） |
 
 注意：**插件不改变模型的调度策略**，也不会自动替 Agent 决策；是否调用 `decision_ask` 完全由模型根据工具描述与任务判断。
@@ -274,7 +279,7 @@ DECISION_API_KEY 环境变量
 | `buildMedia(list, kind)` | 本地文件 → `data:` URL，按扩展名定 MIME、按大小上限拒绝 |
 | `apiRequest(ctx, opts)` | 统一 fetch：超时 35s、`X-API-Key`、错误归一化（`code`/`status`/`retryAfter`） |
 | `resolveApiKey` / `saveApiKey` | 三级解析与写入（见 3.5） |
-| `readSettings` / `writeSettings` | `$DSH_HOME/.dsh-decision.json` 原子读写（`0600`） |
+| `readSettings` / `writeSettings` | `$DSH_HOME/dsh-decision/config.json` 原子读写（`0600`） |
 | `rememberResult` / `recallResult` | 结果缓存与持久化（防抖写、TTL 1h、上限 200） |
 | `buildStatus(ctx, {refresh})` | 设置页主体：Key 状态、模型表、limits、诊断信息；Host 端 20 秒复用 |
 | `buildUsage(ctx, {refresh})` | 配额与用量（独立慢请求，`USAGE_TIMEOUT_MS = 4s`），20 秒复用 |
@@ -442,7 +447,7 @@ node .bench/probe2.mjs
 - 设置页的即时感依赖浏览器 `localStorage` 快照（`status` / `usage` 各一份，24 小时过期）与 Host 端 20 秒缓存；换浏览器、清缓存或很久没打开时，首次进入仍会走一次网络（模型表 4–5 秒、配额 1–3 秒）。
 - 服务端可能记录请求与响应（见官方 Logging 章节），不要发送敏感数据。
 - 视频只作为普通题的输入（`noul` / `choice` / `score`），不产生轨迹（`track`）；`box` 只有 `d3-turbo` / `d3-ultra` / `d3-flash` 支持。
-- 插件不导出 `Config`：参数在设置页与 `$DSH_HOME/.dsh-decision.json` 管理，不引入 `schemastery` 依赖。
+- 插件不导出 `Config`：参数在设置页与 `$DSH_HOME/dsh-decision/config.json` 管理，不引入 `schemastery` 依赖。
 - 卡片渲染在工具调用行内（不在助手正文里），历史会话需要滚到对应调用处。
 
 <a id="10-兼容性"></a>
@@ -468,7 +473,7 @@ node .bench/probe2.mjs
 |---|---|---|
 | `ctx.tools.register` | 注册 `decision_ask` / `decision_info` | 插件不激活（`inject: ['tools']`） |
 | `ctx.inject(['webServer'])` + `webServer.register` | 五条同源路由 | 工具可用，设置页/卡片报 404 |
-| `ctx.credentials` | Key 存 `DECISION_API_KEY` | 回退到环境变量或 `$DSH_HOME/.dsh-decision.json` |
+| `ctx.credentials` | Key 存 `DECISION_API_KEY` | 回退到环境变量或 `$DSH_HOME/dsh-decision/config.json` |
 | `ctx.slots`（`settings.section`、`tool.call.toolview`） | 设置页与卡片 | 只影响 UI，不影响工具 |
 | `window.__ModuleLoader__` | Client bundle 注册 | 同上 |
 | `--dsw-alias-*` 主题 token | 样式跟随主题 | 回退为基础样式，不崩 |
