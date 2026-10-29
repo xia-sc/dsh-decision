@@ -1,6 +1,6 @@
 {
   "name": "@xia-sc/dsh-decision",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Decision 3.0 multimodal decision models for DeepSeek Harness: calibrated-probability tools, a Settings page and a probability-bar card",
   "license": "MIT",
   "homepage": "https://github.com/xia-sc/dsh-decision#readme",
@@ -20,7 +20,8 @@
     "multimodal"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "dsh": ">=0.2.1-rc.3 <0.3.0-0"
   },
   "type": "module",
   "exports": {
@@ -36,6 +37,7 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "publishConfig": {
@@ -43,6 +45,7 @@
   },
   "scripts": {
     "check": "node --check index.js && node --check client.js",
+    "test": "node scripts/smoke-regressions.mjs",
     "prepublishOnly": "node scripts/preflight.mjs"
   },
   "dsh": {
@@ -52,9 +55,7 @@
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-conversation"
-      ]
+      "inject": []
     }
   }
 }
