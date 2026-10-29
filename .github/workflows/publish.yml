@@ -1,9 +1,11 @@
 name: publish
 
-# Publish @xia-sc/dsh-decision to npm.
+# Publish @xia-sc/dsh-decision to npm and record a matching GitHub Release.
 #
 # Trigger: push a `v*` tag whose name matches package.json's version, or run the
 # workflow manually from the Actions tab and type the version you are confirming.
+# A tag push both publishes npm and creates/keeps the GitHub Release for that tag,
+# so the two never drift apart (v0.2.0 was published without a Release once).
 #
 # Authentication: npm Trusted Publishing (OIDC) — configured on npmjs.com for
 # this package (Settings → Trusted publishing → GitHub, repository
@@ -11,7 +13,7 @@ name: publish
 # `id-token: write` below lets npm exchange the GitHub OIDC token for a
 # short-lived publish credential and attach a provenance attestation.
 #
-# There is deliberately no token/secret path: README §10.5 documents this one.
+# There is deliberately no token/secret path: README documents this one.
 
 on:
   push:
@@ -24,7 +26,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -83,3 +85,15 @@ jobs:
       - name: Publish to npm (Trusted Publishing / OIDC)
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
+
+      # Keep the GitHub Release in lockstep with the tag. Idempotent on reruns.
+      - name: Create GitHub Release (tag pushes)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "::notice::release ${GITHUB_REF_NAME} already exists"
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
