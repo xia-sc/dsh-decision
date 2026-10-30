@@ -184,6 +184,9 @@ window.__ModuleLoader__.load({
         const node = document.createElement('style')
         node.id = STYLE_ID
         node.setAttribute('data-plugin-css', 'dsh-decision')
+        // rc.5's bundle loader removes a package's own <style> nodes on unload by
+        // data-plugin; declaring it here is a second cleanup path beside our effect.
+        node.dataset.plugin = '@xia-sc/dsh-decision'
         node.textContent = STYLES
         document.head.appendChild(node)
         stylesInserted = true

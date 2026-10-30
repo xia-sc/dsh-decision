@@ -3,6 +3,37 @@
 本文件记录 `@xia-sc/dsh-decision` 的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] — 2026-10-30
+
+DSH **0.2.1-rc.5** 兼容性测试修复版。参数形状与返回结构不变。
+
+### 修复
+
+- **清除 API Key 无效**：`POST /config {"apiKey":""}` 现在优先调用 DSH credentials 的 `unset(ref)`
+  （rc.3 起接口就是 `resolve/describe/set/unset`，没有 `delete`/`remove`）。此前桌面形态只删掉
+  `config.json` 的兜底副本，credentials 里的 Key 仍被 `resolveApiKey` 取到，清除实际无效；旧接口
+  `delete`/`remove` 保留为回退。
+- **工具参数 schema 对齐 DSH enforced JSON-Schema subset**：`decision_ask.parameters.questions.additionalProperties`
+  由 schema 对象改为 boolean `true`，每题形状移入 `description`。此前能注册只是因为 raw `parameters`
+  不做 subset 断言，DSH 收紧参数校验或 PTC 使用参数时会失败；插件侧 `buildQuestions()` 逐题强校验不变。
+- **样式节点补 `data-plugin="@xia-sc/dsh-decision"`**：对齐 DSH 0.2.1-rc.5 按插件清理自有 `<style>`
+  的约定，作为 `ctx.effect` 清理之外的第二道保险（HMR 场景）。
+
+### 测试
+
+- `scripts/smoke-regressions.mjs` 增至 **141 条断言**：新增 `clear-key`（10 条：rc.5 `unset` 形态与旧
+  `delete` 回退形态）与 `schema-subset`（6 条：递归守卫 `additionalProperties` 必须为 boolean）。
+- 兼容性实测（DSH 0.2.1-rc.5）：Host 工具注册、5 条同源路由、两个 Client 槽位、12 个主题 token、
+  `engines.dsh` 放行均通过；rc.3 → rc.5 相关 DSH 包无契约变化（仅 `dsh-client-modules` 构建 hash 不同）。
+- `preflight`（3 个 smoke）通过。
+
+### 升级注意
+
+- `decision_ask` 的工具 schema 描述更集中（每题形状在 description），模型侧行为不变；返回值与
+  `lowConfidence` / `warnings` / `hint` 契约不变。
+- `output.schema` 在 rc.5 会被真实校验且 `additionalProperties: false`：以后给工具返回值加字段必须
+  同步 schema，否则会 `INVALID_TOOL_OUTPUT`。
+
 ## [0.2.0] — 2026-10-29
 
 本版是**行为变更版**：修复了上一轮全面测试报告（`test-reports/REPORT.md`）中的 3 个 P1、19 个 P2 与主要 P3，

@@ -57,10 +57,10 @@
 # 从 npm 安装（推荐）
 dsh plugin --profile web add @xia-sc/dsh-decision
 
-# 锁定版本（当前 0.2.0）
-dsh plugin --profile web add @xia-sc/dsh-decision@0.2.0
+# 锁定版本（当前 0.2.1）
+dsh plugin --profile web add @xia-sc/dsh-decision@0.2.1
 
-# 从 GitHub 源安装（可加 #v0.2.0 / #master 指定 tag / 分支）
+# 从 GitHub 源安装（可加 #v0.2.1 / #master 指定 tag / 分支）
 dsh plugin --profile web add github:xia-sc/dsh-decision
 
 # 从本地仓库安装（开发 / 调试）：装出来是 link，改代码后重载插件 / 重启应用即生效
@@ -68,7 +68,7 @@ git clone https://github.com/xia-sc/dsh-decision.git && cd dsh-decision
 dsh plugin --profile web add .
 ```
 
-> `0.2.0` 是当前版本（变更见 [CHANGELOG.md](CHANGELOG.md)）；若 npm 上暂时还看不到（发布传播延迟），
+> `0.2.1` 是当前版本（变更见 [CHANGELOG.md](CHANGELOG.md)）；若 npm 上暂时还看不到（发布传播延迟），
 > 可用 GitHub 源或本地目录安装。装完记得重启宿主（`dsh web` 或桌面应用）。
 > 桌面版 profile 由应用独占管理，请在应用内用插件管理器安装 / 卸载。
 
@@ -123,6 +123,6 @@ Agent 侧直接调用工具，不需要写代码。一次调用可以问多个�
 
 - DSH 0.2.x（实测 `0.2.1-rc.3`，`engines.dsh` 会拒绝不兼容版本）、Node ≥ 18；零 npm 依赖、无需构建。
 - Web GUI（`dsh web` / 桌面应用）下功能完整；TUI / headless 里工具可用，但没有 HTTP 路由，设置页与卡片不出现（Key 用环境变量或文件配置）。
-- 版本与变更见 [CHANGELOG.md](CHANGELOG.md)，当前 `0.2.0`。发布由 [`.github/workflows/publish.yml`](.github/workflows/publish.yml) 在 push `v*` tag 后走 OIDC 自动发布到 npm，并创建同 tag 的 GitHub Release；发布前门禁是 `npm test` + `node scripts/preflight.mjs`。
+- 版本与变更见 [CHANGELOG.md](CHANGELOG.md)，当前 `0.2.1`。发布由 [`.github/workflows/publish.yml`](.github/workflows/publish.yml) 在 push `v*` tag 后走 OIDC 自动发布到 npm，并创建同 tag 的 GitHub Release；发布前门禁是 `npm test` + `node scripts/preflight.mjs`。
 
 MIT © xia-sc

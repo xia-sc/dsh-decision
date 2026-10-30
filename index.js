@@ -245,7 +245,12 @@ async function saveApiKey(ctx, apiKey) {
 async function clearApiKey(ctx) {
   const credentials = ctx.get ? ctx.get('credentials') : undefined
   if (credentials) {
-    const remove = typeof credentials.delete === 'function' ? credentials.delete : credentials.remove
+    // rc.5 (and rc.3) credentials providers expose `unset(ref)`; older/alternate
+    // implementations used `delete`/`remove`, which are kept as fallbacks.
+    const remove =
+      (typeof credentials.unset === 'function' && credentials.unset) ||
+      (typeof credentials.delete === 'function' && credentials.delete) ||
+      (typeof credentials.remove === 'function' && credentials.remove)
     if (typeof remove === 'function') {
       try {
         await remove.call(credentials, KEY_REF)
@@ -1097,22 +1102,14 @@ const ASK_PARAMETERS = {
     questions: {
       type: 'object',
       description:
-        'Question id → question. Types: choice (criteria = {optionId: short description}, at least 2), ' +
-        'noul (yes/no; criteria optional {"false":...,"true":...}), score (criteria = ordered level descriptions, 2-10), ' +
-        'box (locate something in the single attached image; no criteria). Ask everything about one input in one call.',
-      additionalProperties: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['type', 'instructions'],
-        properties: {
-          type: { type: 'string', enum: QUESTION_TYPES },
-          instructions: { type: 'string', description: 'The question in plain language.' },
-          criteria: {
-            description:
-              'choice: object of option id → description; noul: optional {"false","true"} descriptions; score: array of levels lowest first.',
-          },
-        },
-      },
+        'Question id → question object, shaped { "type": "choice"|"noul"|"score"|"box", "instructions": string, ' +
+        '"criteria"?: ... }. choice: criteria = {optionId: short description} with at least 2 options; noul: criteria ' +
+        'optional {"false":...,"true":...}; score: criteria = ordered level descriptions (2-10, lowest first); ' +
+        'box: no criteria, locate something in the single attached image. Ask everything about one input in one call.',
+      // The parameter schema must stay inside DSH's enforced JSON-Schema subset
+      // (boolean additionalProperties only), so the per-question shape lives in the
+      // description and is validated by execute().
+      additionalProperties: true,
     },
     model: {
       type: 'string',

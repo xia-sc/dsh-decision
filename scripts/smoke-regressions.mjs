@@ -43,6 +43,10 @@
  *                （任一时刻在途 /v1/systemone ≤1），非 box 保持并行，不同 model 可重叠；
  *                命中 429 concurrency_limit 等待约 1500ms 重试一次，两次都 429 原样抛错
  *                （保留 error.status=429 / error.code='concurrency_limit'）；排队中 abort 立即失败且不卡队列。
+ *   clear-key    POST /config {apiKey:""} 清空凭据：rc.5 credentials.unset 优先（计数=1），
+ *                旧接口 delete 回退同样生效；硬盘 config.json 无明文 apiKey 残留
+ *   schema-subset 工具 parameters / output.schema 递归检查：additionalProperties 若出现必须是 boolean
+ *                （DSH rc.5 enforced JSON-Schema subset；questions.additionalProperties === true）
  *
  * 环境变量（仅自测/调试用，正常验收不需要）：
  *   SMOKE_INDEX  覆盖被测 index.js 路径（默认 <repo>/index.js）
@@ -206,7 +210,7 @@ class Recorder {
 
 let modSeq = 0
 
-function makeCtx({ noCreds = true, withRoutes = true } = {}) {
+function makeCtx({ noCreds = true, withRoutes = true, credentials: providedCredentials } = {}) {
   const tools = []
   const routes = []
   const disposers = []
@@ -226,18 +230,22 @@ function makeCtx({ noCreds = true, withRoutes = true } = {}) {
       }
     : undefined
 
+  // 用例可注入自己的 credentials 假实现（例如 rc.5 的 {resolve,set,unset} 或旧接口 {resolve,set,delete}）。
+  const credentials =
+    providedCredentials !== undefined
+      ? providedCredentials
+      : noCreds
+        ? undefined
+        : {
+            resolve: async () => ({ value: FAKE_KEY }),
+            set: async () => {},
+            delete: async () => {},
+          }
+
   const scoped = {
     get: (name) => (name === 'webServer' ? webServer : name === 'credentials' ? credentials : undefined),
     webServer,
   }
-
-  const credentials = noCreds
-    ? undefined
-    : {
-        resolve: async () => ({ value: FAKE_KEY }),
-        set: async () => {},
-        delete: async () => {},
-      }
 
   const ctx = {
     tools: {
@@ -436,7 +444,11 @@ async function openPlugin(name, options = {}) {
     throw failure
   }
 
-  const made = makeCtx({ noCreds: options.noCreds !== false, withRoutes: options.withRoutes !== false })
+  const made = makeCtx({
+    noCreds: options.noCreds !== false,
+    withRoutes: options.withRoutes !== false,
+    credentials: options.credentials,
+  })
   mod.apply(made.ctx)
 
   const askTool = made.tools.find((tool) => tool.name === 'decision_ask')
@@ -560,6 +572,26 @@ function lastSystemoneBody(plugin) {
 
 function normalizeMask(value) {
   return String(value === undefined || value === null ? '' : value).replace(/\.\.\./g, '…')
+}
+
+/**
+ * 递归收集“additionalProperties 不是 boolean”的位置。
+ * DSH 0.2.1-rc.5 的 JSON-Schema subset（json-schema.js）只接受 boolean additionalProperties；
+ * 内联 schema 对象会被判为不合法，工具注册/输出校验因此失败。
+ */
+function findNonBooleanAdditionalProperties(node, path, violations) {
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => findNonBooleanAdditionalProperties(item, `${path}[${index}]`, violations))
+    return
+  }
+  if (!node || typeof node !== 'object') return
+  for (const [key, value] of Object.entries(node)) {
+    const next = `${path}.${key}`
+    if (key === 'additionalProperties' && typeof value !== 'boolean') {
+      violations.push(`${next} = ${typeof value}: ${clip(value, 120)}`)
+    }
+    findNonBooleanAdditionalProperties(value, next, violations)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1380,128 @@ testCase('box-queue-abort', 'box 并发：排队中被 abort 立即失败、不�
       `systemone 总数=${tracked.state.total}`,
     )
     t.assert('队列未被 abort 卡死：后续第三个 box 请求正常完成', thirdOutcome.ok, thirdOutcome.ok ? '调用成功' : `error=${thirdOutcome.error}`)
+  } finally {
+    await p.dispose()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// clear-key：POST /config {apiKey:""} 清除凭据（rc.5 unset / 旧 delete 回退）
+// ---------------------------------------------------------------------------
+
+testCase('clear-key', 'clear-key：POST /config {apiKey:""} 清除凭据（rc.5 unset 与旧 delete 回退）', async (t) => {
+  // 变体 1：DSH 0.2.1-rc.5 的 credentials 接口只有 resolve/set/unset（无 delete/remove）
+  const unsetStats = { resolve: 0, set: 0, unset: 0 }
+  let stored = FAKE_KEY
+  const rc5Credentials = {
+    async resolve() {
+      unsetStats.resolve += 1
+      return stored ? { value: stored, source: 'credentials' } : undefined
+    },
+    async set(_ref, value) {
+      unsetStats.set += 1
+      stored = value
+    },
+    async unset() {
+      unsetStats.unset += 1
+      stored = ''
+    },
+  }
+  const p = await openPlugin('clear-key-unset', { credentials: rc5Credentials })
+  try {
+    const before = await p.hit('/status')
+    t.assert('预置 credentials 中的 key → GET /status keyConfigured=true', Boolean(before.status === 200 && before.json && before.json.keyConfigured === true), httpDetail(before))
+
+    const cleared = await p.hit('/config', { method: 'POST', body: { apiKey: '' } })
+    t.assert('POST /config {apiKey:""} → 200', cleared.status === 200, httpDetail(cleared))
+    t.assert('清空响应 keyConfigured=false', Boolean(cleared.json && cleared.json.keyConfigured === false), httpDetail(cleared))
+
+    const after = await p.hit('/status', { url: '/dsh-decision/status?refresh=1' })
+    t.assert('刷新 GET /status 仍 keyConfigured=false', Boolean(after.status === 200 && after.json && after.json.keyConfigured === false), httpDetail(after))
+    t.assert(
+      'rc.5 credentials.unset(ref) 恰好被调用一次',
+      unsetStats.unset === 1,
+      `unset=${unsetStats.unset} set=${unsetStats.set} resolve=${unsetStats.resolve}`,
+    )
+    const cfg = await p.readConfig()
+    t.assert('清空后硬盘 config.json 不含明文 apiKey', !cfg || !Object.prototype.hasOwnProperty.call(cfg, 'apiKey'), `keys=${cfg ? Object.keys(cfg).join(',') : '(无文件)'}`)
+  } finally {
+    await p.dispose()
+  }
+
+  // 变体 2：旧/替代 credentials 实现只有 delete（无 unset/remove）→ 兼容回退必须同样能清除
+  const legacyStats = { set: 0, delete: 0 }
+  let legacyStored = FAKE_KEY
+  const legacyCredentials = {
+    async resolve() {
+      return legacyStored ? { value: legacyStored, source: 'credentials' } : undefined
+    },
+    async set(_ref, value) {
+      legacyStats.set += 1
+      legacyStored = value
+    },
+    async delete() {
+      legacyStats.delete += 1
+      legacyStored = ''
+    },
+  }
+  const legacy = await openPlugin('clear-key-delete', { credentials: legacyCredentials })
+  try {
+    const before = await legacy.hit('/status')
+    t.assert('旧接口变体：预置 key → GET /status keyConfigured=true', Boolean(before.status === 200 && before.json && before.json.keyConfigured === true), httpDetail(before))
+
+    const cleared = await legacy.hit('/config', { method: 'POST', body: { apiKey: '' } })
+    t.assert('旧接口变体：POST /config {apiKey:""} → 200', cleared.status === 200, httpDetail(cleared))
+
+    const after = await legacy.hit('/status', { url: '/dsh-decision/status?refresh=1' })
+    t.assert('旧接口变体：清空后 keyConfigured=false', Boolean(after.status === 200 && after.json && after.json.keyConfigured === false), httpDetail(after))
+    t.assert('旧接口 credentials.delete(ref) 回退被调用一次', legacyStats.delete === 1, `delete=${legacyStats.delete} set=${legacyStats.set}`)
+  } finally {
+    await legacy.dispose()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// schema subset：additionalProperties 必须是 boolean（rc.5 enforced JSON-Schema subset）
+// ---------------------------------------------------------------------------
+
+testCase('schema-subset', 'schema-subset：parameters / output.schema 的 additionalProperties 均为 boolean', async (t) => {
+  const p = await openPlugin('schema-subset')
+  try {
+    const targets = [
+      ['decision_ask.parameters', p.askTool && p.askTool.parameters],
+      ['decision_info.parameters', p.infoTool && p.infoTool.parameters],
+      ['decision_ask.output.schema', p.askTool && p.askTool.output && p.askTool.output.schema],
+      ['decision_info.output.schema', p.infoTool && p.infoTool.output && p.infoTool.output.schema],
+    ]
+    for (const [label, schema] of targets) {
+      const violations = []
+      if (schema && typeof schema === 'object') findNonBooleanAdditionalProperties(schema, label, violations)
+      t.assert(
+        `${label} 的 additionalProperties 均为 boolean（无内联 schema 对象）`,
+        Boolean(schema) && violations.length === 0,
+        schema ? `violations=${violations.length}${violations.length ? `: ${violations.join(' | ')}` : ''}` : 'schema 缺失',
+      )
+    }
+
+    const questions = p.askTool && p.askTool.parameters && p.askTool.parameters.properties && p.askTool.parameters.properties.questions
+    t.assert(
+      'decision_ask.parameters.properties.questions.additionalProperties === true',
+      Boolean(questions && questions.additionalProperties === true),
+      `actual=${questions ? clip(questions.additionalProperties) : 'questions 缺失'}`,
+    )
+
+    const infoAction = p.infoTool && p.infoTool.parameters && p.infoTool.parameters.properties && p.infoTool.parameters.properties.action
+    t.assert(
+      'decision_info.parameters.properties.action 为 string enum（models/usage/status）',
+      Boolean(
+        infoAction &&
+          infoAction.type === 'string' &&
+          Array.isArray(infoAction.enum) &&
+          ['models', 'usage', 'status'].every((value) => infoAction.enum.includes(value)),
+      ),
+      `enum=${infoAction ? clip(infoAction.enum) : '缺失'}`,
+    )
   } finally {
     await p.dispose()
   }
