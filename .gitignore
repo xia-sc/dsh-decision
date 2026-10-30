@@ -6,5 +6,8 @@ node_modules/
 *.tmp
 *.log
 
-# 本地测试图片（probe2.mjs 需要时用 Pillow 生成，见 README 7.1）
+# 测试报告与测试产物（本地生成，不入库）
+test-reports/
+
+# 本地测试图片（probe2.mjs 需要时用 Pillow 生成）
 .bench/test.png
